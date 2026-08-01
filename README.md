@@ -13,6 +13,8 @@ npm start
 
 Then open **http://localhost:3000** in your browser. The app auto-loads any `.csv` file found in the project root.
 
+![Screenshot](public/screenshot.png)
+
 ## How It Works
 
 1. Place your HWiNFO64 CSV log (named `metrics.csv` or any `.csv`) in the project root
