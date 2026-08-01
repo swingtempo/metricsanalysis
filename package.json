@@ -1,0 +1,13 @@
+{
+  "name": "metrics-viewer",
+  "version": "1.0.0",
+  "description": "Interactive web app for viewing and charting system metrics CSV data",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

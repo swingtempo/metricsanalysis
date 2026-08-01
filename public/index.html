@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Metrics Viewer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
+<style>
+  :root {
+    --bg: #1a1a2e; --surface: #16213e; --surface2: #0f3460;
+    --text: #e0e0e0; --text-dim: #888; --accent: #e94560;
+    --border: #2a2a4a; --highlight: #00d2ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; }
+
+  /* Header */
+  .header { background: var(--surface); padding: 12px 24px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
+  .header h1 { font-size: 1.2rem; color: var(--accent); white-space: nowrap; }
+  .header input[type="file"] { display: none; }
+  .btn { background: var(--surface2); color: var(--text); border: 1px solid var(--border); padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; white-space: nowrap; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); }
+  .status { font-size: 0.8rem; color: var(--text-dim); margin-left: auto; }
+
+  /* Layout */
+  .layout { display: flex; height: calc(100vh - 49px); }
+
+  /* Sidebar */
+  .sidebar { width: 300px; min-width: 260px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .sidebar-header { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
+  .sidebar-header input { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 5px 10px; border-radius: 4px; font-size: 0.85rem; }
+  .sidebar-actions { padding: 8px 14px; display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+  .sidebar-actions .btn { font-size: 0.75rem; padding: 3px 8px; }
+  .metric-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+  .metric-list::-webkit-scrollbar { width: 6px; }
+  .metric-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .category { border-bottom: 1px solid var(--border); }
+  .category-header { padding: 8px 14px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 0.85rem; user-select: none; }
+  .category-header:hover { background: rgba(255,255,255,0.03); }
+  .category-header .arrow { transition: transform 0.15s; font-size: 0.7rem; }
+  .category-header.collapsed .arrow { transform: rotate(-90deg); }
+  .category-count { font-size: 0.7rem; color: var(--text-dim); margin-left: auto; font-weight: 400; }
+  .metric-item { padding: 5px 14px 5px 30px; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 0.8rem; transition: background 0.1s; }
+  .metric-item:hover { background: rgba(255,255,255,0.03); }
+  .metric-item .checkbox { width: 14px; height: 14px; border-radius: 3px; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
+  .metric-item .checkbox.checked { border-color: var(--highlight); background: var(--highlight); }
+  .metric-item .checkbox.checked::after { content: '✓'; font-size: 10px; color: var(--bg); font-weight: bold; }
+  .metric-item .checkbox.highlighted { border-color: var(--accent); background: var(--accent); }
+  .metric-item .checkbox.highlighted::after { content: '★'; font-size: 10px; color: white; font-weight: bold; }
+  .metric-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .metric-item.dimmed .name { color: var(--text-dim); }
+
+  /* Main content */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Time controls */
+  .time-controls { padding: 10px 20px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .time-controls label { font-size: 0.8rem; color: var(--text-dim); }
+  .time-controls input[type="datetime-local"] { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; }
+  .time-controls .range-info { font-size: 0.8rem; color: var(--text-dim); margin-left: auto; }
+
+  /* Chart area */
+  .chart-container { flex: 1; padding: 10px; overflow: hidden; }
+  .chart-container .chart-panel { margin-bottom: 10px; background: var(--surface); border-radius: 8px; border: 1px solid var(--border); overflow: hidden; }
+  .chart-panel .chart-title { padding: 8px 14px; font-size: 0.85rem; font-weight: 600; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .chart-panel .chart-title .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .chart-panel .js-plotly-plot { height: calc(100% - 37px) !important; }
+
+  /* Table view */
+  .table-container { flex: 1; overflow: auto; padding: 10px; }
+  .data-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+  .data-table th { position: sticky; top: 0; background: var(--surface2); padding: 6px 10px; text-align: left; border-bottom: 2px solid var(--accent); white-space: nowrap; z-index: 1; }
+  .data-table td { padding: 4px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .data-table tr:hover td { background: rgba(255,255,255,0.03); }
+  .data-table .time-col { color: var(--highlight); font-weight: 600; }
+
+  /* View toggle */
+  .view-toggle { display: flex; gap: 0; }
+  .view-toggle .btn { border-radius: 0; }
+  .view-toggle .btn:first-child { border-radius: 6px 0 0 6px; }
+  .view-toggle .btn:last-child { border-radius: 0 6px 6px 0; }
+  .view-toggle .btn.active { background: var(--accent); border-color: var(--accent); }
+
+  /* Loading overlay */
+  .loading { position: fixed; inset: 0; background: rgba(26,26,46,0.9); display: flex; align-items: center; justify-content: center; z-index: 999; flex-direction: column; gap: 16px; }
+  .loading.hidden { display: none; }
+  .spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Drag resize handle */
+  .resize-handle { width: 4px; cursor: col-resize; background: transparent; transition: background 0.2s; flex-shrink: 0; }
+  .resize-handle:hover, .resize-handle.active { background: var(--accent); }
+
+  /* Drop zone */
+  .drop-zone { position: fixed; inset: 0; background: rgba(233,69,96,0.15); border: 3px dashed var(--accent); display: flex; align-items: center; justify-content: center; z-index: 200; font-size: 1.5rem; color: var(--accent); pointer-events: none; }
+  .drop-zone.hidden { display: none; }
+
+  /* Chart count control */
+  .chart-count-control { display: flex; align-items: center; gap: 6px; }
+  .chart-count-control input { width: 50px; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 3px 6px; border-radius: 4px; font-size: 0.8rem; text-align: center; }
+</style>
+</head>
+<body>
+
+<div class="loading" id="loading">
+  <div class="spinner"></div>
+  <div>Processing CSV...</div>
+</div>
+
+<div class="drop-zone hidden" id="dropZone">Drop CSV file here</div>
+
+<div class="header">
+  <h1>📊 Metrics Viewer</h1>
+  <label class="btn primary" for="fileInput">📁 Load CSV</label>
+  <input type="file" id="fileInput" accept=".csv">
+  <div class="view-toggle">
+    <button class="btn active" id="btnChartView" onclick="setView('chart')">📈 Chart</button>
+    <button class="btn" id="btnTableView" onclick="setView('table')">📋 Table</button>
+  </div>
+  <div class="chart-count-control">
+    <label>Charts:</label>
+    <input type="number" id="chartCount" value="3" min="1" max="12" onchange="updateChartCount()">
+  </div>
+  <div class="status" id="status">Loading...</div>
+  <select id="csvSelect" class="btn" style="display:none;" onchange="loadSelectedCSV(this.value)"></select>
+</div>
+
+<div class="layout">
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <input type="text" id="searchInput" placeholder="Search metrics..." oninput="filterMetrics()">
+    </div>
+    <div class="sidebar-actions">
+      <button class="btn" onclick="selectAll()">Select All</button>
+      <button class="btn" onclick="deselectAll()">Deselect All</button>
+      <button class="btn" onclick="selectCategory(defaultCategory)">Default Set</button>
+      <button class="btn" onclick="invertSelection()">Invert</button>
+    </div>
+    <div class="metric-list" id="metricList"></div>
+  </div>
+  <div class="resize-handle" id="resizeHandle"></div>
+  <div class="main">
+    <div class="time-controls" id="timeControls">
+      <label>From:</label>
+      <input type="datetime-local" id="timeFrom">
+      <label>To:</label>
+      <input type="datetime-local" id="timeTo">
+      <button class="btn" onclick="applyTimeRange()">Apply</button>
+      <button class="btn" onclick="resetTimeRange()">Reset</button>
+      <div class="range-info" id="rangeInfo"></div>
+    </div>
+    <div class="chart-container" id="chartContainer"></div>
+    <div class="table-container" id="tableContainer" style="display:none;"></div>
+  </div>
+</div>
+
+<script>
+// ── State ──
+let rawData = null;       // full parsed CSV array
+let filteredData = null;  // time-filtered subset
+let columns = [];
+let timeCol = null, dateCol = null;
+let metricMeta = [];      // {name, category, type, selected, highlighted}
+let currentView = 'chart';
+let chartCount = 3;
+let allTimes = [];
+let originalFrom = null, originalTo = null;
+
+const CATEGORY_COLORS = [
+  '#e94560','#00d2ff','#f0c23f','#50c878','#9b59b6',
+  '#e67e22','#1abc9c','#e74c3c','#3498db','#2ecc71',
+  '#f39c12','#8e44ad','#16a085','#c0392b','#2980b9',
+  '#d35400','#27ae60','#7f8c8d','#6c3483','#1a5276'
+];
+
+// ── Default metrics to show ──
+const DEFAULT_METRICS = [
+  'Core Usage (avg) [%]','Total CPU Usage [%]',
+  'CPU Package Power [W]','CPU (Tctl/Tdie) [°C]',
+  'GPU Core Load [%]','GPU Power [W]','GPU Temperature [°C]',
+  'GPU Clock [MHz]','Core Clocks (avg) [MHz]',
+  'Physical Memory Load [%]','Virtual Memory Load [%]',
+  'Framerate Presented (avg) [FPS]'
+];
+
+// ── Category inference ──
+function inferCategory(name) {
+  const n = name.toLowerCase();
+  if (n.includes('cpu') || n.includes('core') || n.includes('thread') || n.includes('package') || n.includes('ccd') || n.includes('fabric') || n.includes('ratio') || n.includes('residency') || n.includes('utility') || n.includes('usage') && (n.includes('cpu') || n.includes('core'))) return 'CPU';
+  if (n.includes('gpu') || n.includes('d3d') || n.includes('framerate') || n.includes('frame time') || n.includes('fps') || n.includes('nvvdd') || n.includes('sram') && n.includes('gpu')) return 'GPU';
+  if (n.includes('memory') || n.includes('virtual') || n.includes('page file') || n.includes('physical memory') || n.includes('tcas') || n.includes('trcd') || n.includes('command rate')) return 'Memory';
+  if (n.includes('power') || n.includes('ppt') || n.includes('tdc') || n.includes('edc') || n.includes('watt') || n.includes('[w]')) return 'Power';
+  if (n.includes('temp') || n.includes('thermal') || n.includes('°c') || n.includes('hotspot') || n.includes('motherboard') || n.includes('chipset')) return 'Temperature';
+  if (n.includes('volt') || n.includes('[v]') || n.includes('vid') || n.includes('vcore') || n.includes('soc voltage') || n.includes('vsb')) return 'Voltage';
+  if (n.includes('current') || n.includes('[a]')) return 'Current';
+  if (n.includes('clock') || n.includes('frequency') || n.includes('[mhz]') || n.includes('fclk') || n.includes('uclk')) return 'Clocks';
+  if (n.includes('drive') || n.includes('host write') || n.includes('host read') || n.includes('remaining life') || n.includes('available spare')) return 'Storage';
+  if (n.includes('read rate') || n.includes('write rate') || n.includes('read activity') || n.includes('write activity') || n.includes('read total') || n.includes('write total')) return 'Disk I/O';
+  if (n.includes('fan') || n.includes('rpm')) return 'Fans';
+  if (n.includes('pcie') || n.includes('lane') || n.includes('link speed')) return 'PCIe';
+  if (n.includes('bandwidth') || n.includes('dl') || n.includes('up') && n.includes('rate')) return 'Network';
+  if (n.includes('throttling') || n.includes('limit') || n.includes('performance')) return 'Limits/Throttling';
+  if (n.includes('frametime') || n.includes('framerate') || n.includes('animation error')) return 'Framing';
+  return 'Other';
+}
+
+function inferType(name, sampleVal) {
+  const n = name.toLowerCase();
+  if (n.includes('[yes/no]') || n.includes('[% of tdp]')) return 'categorical';
+  if (n.includes('[gb]') || n.includes('[gb/s]') || n.includes('[mb/s]') || n.includes('[mb]')) return 'large-number';
+  if (!isNaN(parseFloat(sampleVal)) && isFinite(sampleVal)) return 'numeric';
+  return 'text';
+}
+
+// ── File loading ──
+document.getElementById('fileInput').addEventListener('change', handleFile);
+
+// Drag & drop
+document.body.addEventListener('dragover', e => { e.preventDefault(); document.getElementById('dropZone').classList.remove('hidden'); });
+document.body.addEventListener('dragleave', e => { if (e.relatedTarget === null) document.getElementById('dropZone').classList.add('hidden'); });
+document.body.addEventListener('drop', e => {
+  e.preventDefault();
+  document.getElementById('dropZone').classList.add('hidden');
+  if (e.dataTransfer.files.length) processFile(e.dataTransfer.files[0]);
+});
+
+function handleFile(e) {
+  if (e.target.files.length) processFile(e.target.files[0]);
+}
+
+function processFile(file) {
+  document.getElementById('loading').classList.remove('hidden');
+  document.getElementById('status').textContent = `Loading ${file.name}...`;
+
+  Papa.parse(file, {
+    header: true,
+    skipEmptyLines: true,
+    dynamicTyping: false,
+    complete: function(results) {
+      try {
+        rawData = results.data;
+        columns = results.meta.fields;
+        console.log(`Parsed CSV: ${rawData.length} rows, ${columns.length} columns`);
+        console.log('Columns:', columns);
+        initMetrics();
+        selectCategory('default');
+        applyTimeRange();
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('status').textContent = `${file.name} — ${rawData.length} rows × ${columns.length} columns`;
+      } catch(err) {
+        console.error('Error initializing metrics:', err);
+        document.getElementById('loading').classList.add('hidden');
+        document.getElementById('status').textContent = `Error: ${err.message}`;
+      }
+    },
+    error: function(err) {
+      console.error('CSV parse error:', err);
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('status').textContent = `Parse error: ${err.message}`;
+    }
+  });
+}
+
+function initMetrics() {
+  // Find time columns
+  dateCol = columns.find(c => c.toLowerCase().includes('date')) || columns[0];
+  timeCol = columns.find(c => c.toLowerCase().includes('time')) || (columns.length > 1 ? columns[1] : null);
+
+  // Build metric metadata
+  metricMeta = columns.map((col, i) => {
+    if (col === dateCol || col === timeCol) return null;
+    const sampleVal = rawData.length > 0 ? (rawData[0][col] || '') : '';
+    return {
+      name: col,
+      category: inferCategory(col),
+      type: inferType(col, sampleVal),
+      selected: false,
+      highlighted: false
+    };
+  }).filter(Boolean);
+
+  // Parse all timestamps
+  allTimes = rawData.map(row => parseDateTime(row[dateCol], row[timeCol]));
+
+  // Set default time range — skip invalid/epoch-zero timestamps (e.g. footer rows)
+  const validTimes = allTimes.filter(t => t && !isNaN(t.getTime()) && t.getTime() !== 0);
+  originalFrom = validTimes[0] || allTimes[0];
+  originalTo = validTimes[validTimes.length - 1] || allTimes[allTimes.length - 1];
+  document.getElementById('timeFrom').value = toLocalISO(originalFrom);
+  document.getElementById('timeTo').value = toLocalISO(originalTo);
+
+  renderMetricList();
+}
+
+function parseDateTime(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return new Date(0);
+  try {
+    // Handle DD.M.YYYY format
+    const parts = dateStr.split('.');
+    let y, m, d;
+    if (parts.length === 3) {
+      d = parseInt(parts[0]); m = parseInt(parts[1]) - 1; y = parseInt(parts[2]);
+      if (y < 100) y += 2000;
+    } else {
+      return new Date(dateStr + ' ' + timeStr);
+    }
+    const timeParts = timeStr.replace(',', '.').split(':');
+    const h = parseInt(timeParts[0]);
+    const min = parseInt(timeParts[1]);
+    const secParts = timeParts[2] ? timeParts[2].split('.') : ['0', '0'];
+    const s = parseInt(secParts[0]);
+    const ms = secParts[1] ? parseInt(secParts[1]) : 0;
+    return new Date(Date.UTC(y, m, d, h, min, s, ms));
+  } catch { return new Date(0); }
+}
+
+function toLocalISO(date) {
+  if (!date || isNaN(date)) return '';
+  // Use LOCAL time getters so datetime-local input shows correct local time
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const h = String(date.getHours()).padStart(2, '0');
+  const mi = String(date.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${d}T${h}:${mi}`;
+}
+
+function formatTime(date) {
+  if (!date || isNaN(date)) return '';
+  const h = String(date.getUTCHours()).padStart(2, '0');
+  const m = String(date.getUTCMinutes()).padStart(2, '0');
+  const s = String(date.getUTCSeconds()).padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
+
+function formatDate(date) {
+  if (!date || isNaN(date)) return '';
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const y = date.getUTCFullYear();
+  return `${d}.${m}.${y}`;
+}
+
+// ── Metric list rendering ──
+function renderMetricList() {
+  const container = document.getElementById('metricList');
+  const search = document.getElementById('searchInput').value.toLowerCase();
+
+  // Group by category
+  const groups = {};
+  metricMeta.forEach(m => {
+    if (search && !m.name.toLowerCase().includes(search) && !m.category.toLowerCase().includes(search)) return;
+    if (!groups[m.category]) groups[m.category] = [];
+    groups[m.category].push(m);
+  });
+
+  let html = '';
+  const sortedCats = Object.keys(groups).sort();
+  sortedCats.forEach(cat => {
+    const items = groups[cat];
+    const selCount = items.filter(i => i.selected).length;
+    html += `<div class="category" data-cat="${cat}">`;
+    html += `<div class="category-header" onclick="toggleCategory(this, '${cat}')">
+      <span class="arrow">▼</span>
+      <span>${cat}</span>
+      <span class="category-count">${selCount}/${items.length}</span>
+    </div>`;
+    items.forEach(m => {
+      const cbClass = m.highlighted ? 'checkbox highlighted' : (m.selected ? 'checkbox checked' : 'checkbox');
+      const dimClass = m.selected ? '' : 'dimmed';
+      html += `<div class="metric-item ${dimClass}" data-name="${esc(m.name)}" onclick="toggleMetric(this, '${esc(m.name)}', event)">
+        <div class="${cbClass}"></div>
+        <span class="name" title="${esc(m.name)}">${esc(m.name)}</span>
+      </div>`;
+    });
+    html += `</div>`;
+  });
+
+  container.innerHTML = html;
+}
+
+function esc(s) { return s.replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+
+function toggleCategory(el, cat) {
+  el.classList.toggle('collapsed');
+  const items = el.parentElement.querySelectorAll('.metric-item');
+  items.forEach(i => i.style.display = el.classList.contains('collapsed') ? 'none' : '');
+}
+
+function toggleMetric(el, name, event) {
+  const meta = metricMeta.find(m => m.name === name);
+  if (!meta) return;
+
+  if (event && event.shiftKey) {
+    // Shift-click: toggle highlight
+    meta.highlighted = !meta.highlighted;
+    if (meta.highlighted) meta.selected = true;
+  } else if (event && event.ctrlKey) {
+    // Ctrl-click: just toggle without redrawing everything
+    meta.selected = !meta.selected;
+  } else {
+    // Click: if only this one is selected, deselect it. Otherwise make it the only one.
+    const allSelected = metricMeta.filter(m => m.selected).length;
+    if (meta.selected && allSelected <= 3) {
+      meta.selected = false;
+      meta.highlighted = false;
+    } else {
+      metricMeta.forEach(m => { m.selected = false; m.highlighted = false; });
+      meta.selected = true;
+    }
+  }
+  renderMetricList();
+  drawCharts();
+}
+
+function selectAll() {
+  metricMeta.forEach(m => m.selected = true);
+  renderMetricList();
+  drawCharts();
+}
+
+function deselectAll() {
+  metricMeta.forEach(m => { m.selected = false; m.highlighted = false; });
+  renderMetricList();
+  drawCharts();
+}
+
+function invertSelection() {
+  metricMeta.forEach(m => m.selected = !m.selected);
+  renderMetricList();
+  drawCharts();
+}
+
+function selectCategory(cat) {
+  if (cat === 'default') {
+    metricMeta.forEach(m => {
+      m.selected = DEFAULT_METRICS.includes(m.name);
+      m.highlighted = false;
+    });
+  } else {
+    metricMeta.forEach(m => {
+      m.selected = m.category === cat;
+      m.highlighted = false;
+    });
+  }
+  renderMetricList();
+  drawCharts();
+}
+
+function filterMetrics() { renderMetricList(); }
+
+// ── Time range ──
+function applyTimeRange() {
+  const fromVal = document.getElementById('timeFrom').value;
+  const toVal = document.getElementById('timeTo').value;
+
+  // datetime-local values are local time; new Date() interprets them as local → gives correct UTC internally
+  let from = fromVal ? new Date(fromVal) : originalFrom;
+  let to = toVal ? new Date(toVal) : originalTo;
+
+  if (isNaN(from) || isNaN(to)) {
+    document.getElementById('status').textContent = 'Invalid date range';
+    return;
+  }
+
+  filteredData = rawData.filter((_, i) => allTimes[i] && !isNaN(allTimes[i].getTime()) && allTimes[i].getTime() !== 0 && allTimes[i] >= from && allTimes[i] <= to);
+
+  document.getElementById('rangeInfo').textContent = `${filteredData.length} samples | ${formatDate(from)} ${formatTime(from)} → ${formatDate(to)} ${formatTime(to)}`;
+
+  if (currentView === 'chart') drawCharts();
+  else drawTable();
+}
+
+function resetTimeRange() {
+  document.getElementById('timeFrom').value = toLocalISO(allTimes[0]);
+  document.getElementById('timeTo').value = toLocalISO(allTimes[allTimes.length - 1]);
+  applyTimeRange();
+}
+
+// ── Chart drawing ──
+function drawCharts() {
+  const container = document.getElementById('chartContainer');
+  container.innerHTML = '';
+
+  const selected = metricMeta.filter(m => m.selected);
+  if (selected.length === 0) {
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);">Select metrics from the sidebar to display charts</div>';
+    return;
+  }
+
+  // Build indices and times for filtered data
+  const data = filteredData || rawData;
+  const indices = [];
+  for (let i = 0; i < rawData.length; i++) {
+    if (data.includes(rawData[i])) indices.push(i);
+  }
+  const times = indices.map(i => allTimes[i]);
+
+  if (times.length === 0) {
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);">No data in selected time range</div>';
+    return;
+  }
+
+  // Distribute metrics across chart panels
+  const highlighted = selected.filter(m => m.highlighted);
+  const normal = selected.filter(m => !m.highlighted);
+
+  // Group by category for logical chart grouping
+  const groups = {};
+  selected.forEach(m => {
+    if (!groups[m.category]) groups[m.category] = [];
+    groups[m.category].push(m);
+  });
+
+  let panelIdx = 0;
+  const maxPanels = chartCount;
+  const cats = Object.keys(groups);
+
+  cats.forEach((cat, catIdx) => {
+    const metrics = groups[cat];
+    const color = CATEGORY_COLORS[catIdx % CATEGORY_COLORS.length];
+
+    metrics.forEach(m => {
+      if (panelIdx >= maxPanels) return;
+
+      const panel = document.createElement('div');
+      panel.className = 'chart-panel';
+      panel.style.height = `${Math.min(350, Math.floor(800 / maxPanels))}px`;
+
+      const titleDiv = document.createElement('div');
+      titleDiv.className = 'chart-title';
+      titleDiv.innerHTML = `<span class="dot" style="background:${color}"></span>${m.name}`;
+      panel.appendChild(titleDiv);
+
+      const plotDiv = document.createElement('div');
+      plotDiv.id = `plot-${panelIdx}`;
+      panel.appendChild(plotDiv);
+      container.appendChild(panel);
+
+      const values = indices.map(i => {
+        const v = rawData[i][m.name];
+        return v === '' || v === null || v === undefined ? null : parseFloat(v);
+      });
+
+      const isHighlighted = m.highlighted;
+      const lineColor = isHighlighted ? '#e94560' : '#00d2ff';
+      const lineWidth = isHighlighted ? 3 : 1.5;
+
+      const trace = {
+        x: times,
+        y: values,
+        type: 'scatter',
+        mode: 'lines',
+        name: m.name,
+        line: { color: lineColor, width: lineWidth },
+        connectgaps: false
+      };
+
+      const layout = {
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#aaa', size: 11 },
+        margin: { t: 5, r: 20, b: 35, l: 60 },
+        xaxis: {
+          type: 'date',
+          gridcolor: 'rgba(255,255,255,0.05)',
+          tickformat: '%H:%M:%S',
+          rangeslider: { visible: false }
+        },
+        yaxis: {
+          gridcolor: 'rgba(255,255,255,0.08)',
+          fixedrange: false
+        },
+        showlegend: false,
+        hovermode: 'x unified',
+        hoverlabel: {
+          bgcolor: '#16213e',
+          bordercolor: '#e94560',
+          font: { color: '#e0e0e0' }
+        }
+      };
+
+      const config = {
+        displayModeBar: true,
+        modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d'],
+        modeBarButtonsToAdd: [],
+        displaylogo: false,
+        scrollZoom: true
+      };
+
+      Plotly.newPlot(plotDiv, [trace], layout, config);
+
+      // On zoom, update time controls
+      plotDiv.on('plotly_relayout', function(eventData) {
+        if (eventData.xaxis.range) {
+          const r = eventData.xaxis.range;
+          document.getElementById('timeFrom').value = toLocalISO(new Date(r[0]));
+          document.getElementById('timeTo').value = toLocalISO(new Date(r[1]));
+        }
+      });
+
+      panelIdx++;
+    });
+  });
+}
+
+// ── Table view ──
+function drawTable() {
+  const container = document.getElementById('tableContainer');
+  const selected = metricMeta.filter(m => m.selected);
+  const displayCols = selected.length > 0 ? selected : metricMeta.slice(0, 20);
+
+  let html = '<table class="data-table"><thead><tr>';
+  html += '<th>Date</th><th>Time</th>';
+  displayCols.forEach(m => { html += `<th>${esc(m.name)}</th>`; });
+  html += '</tr></thead><tbody>';
+
+  const maxRows = Math.min(filteredData.length, 5000);
+  for (let i = 0; i < maxRows; i++) {
+    const row = filteredData[i];
+    const idx = rawData.indexOf(row);
+    html += `<tr>`;
+    html += `<td class="time-col">${formatDate(allTimes[idx])}</td>`;
+    html += `<td class="time-col">${formatTime(allTimes[idx])}</td>`;
+    displayCols.forEach(m => {
+      const v = row[m.name] !== undefined ? row[m.name] : '';
+      html += `<td>${v}</td>`;
+    });
+    html += `</tr>`;
+  }
+
+  if (filteredData.length > 5000) {
+    html += `<tr><td colspan="${displayCols.length + 2}" style="text-align:center;color:var(--text-dim);padding:12px;">Showing first 5000 of ${filteredData.length} rows</td></tr>`;
+  }
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+// ── View toggle ──
+function setView(view) {
+  currentView = view;
+  document.getElementById('btnChartView').classList.toggle('active', view === 'chart');
+  document.getElementById('btnTableView').classList.toggle('active', view === 'table');
+  document.getElementById('chartContainer').style.display = view === 'chart' ? '' : 'none';
+  document.getElementById('tableContainer').style.display = view === 'table' ? '' : 'none';
+
+  if (filteredData) {
+    if (view === 'chart') drawCharts();
+    else drawTable();
+  }
+}
+
+function updateChartCount() {
+  chartCount = parseInt(document.getElementById('chartCount').value) || 3;
+  chartCount = Math.max(1, Math.min(12, chartCount));
+  document.getElementById('chartCount').value = chartCount;
+  if (filteredData) drawCharts();
+}
+
+// ── Sidebar resize ──
+(function() {
+  const handle = document.getElementById('resizeHandle');
+  const sidebar = document.getElementById('sidebar');
+  let isResizing = false;
+
+  handle.addEventListener('mousedown', e => { isResizing = true; handle.classList.add('active'); e.preventDefault(); });
+  document.addEventListener('mousemove', e => {
+    if (!isResizing) return;
+    const w = Math.max(200, Math.min(600, e.clientX));
+    sidebar.style.width = w + 'px';
+  });
+  document.addEventListener('mouseup', () => { isResizing = false; handle.classList.remove('active'); });
+})();
+
+// ── Auto-load CSV from server ──
+async function loadCSVFromServer(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Failed to load');
+    const text = await res.text();
+    const blob = new Blob([text], { type: 'text/csv' });
+    const file = new File([blob], url.split('/').pop(), { type: 'text/csv' });
+    processFile(file);
+  } catch {
+    document.getElementById('status').textContent = 'No CSV found — use Load CSV button';
+  }
+}
+
+async function listCSVFiles() {
+  try {
+    const res = await fetch('/api/files');
+    const files = await res.json();
+    if (files.length > 0) {
+      const sel = document.getElementById('csvSelect');
+      sel.style.display = files.length > 1 ? '' : 'none';
+      sel.innerHTML = files.map(f => `<option value="/${f.name}">${f.name} (${(f.size/1024).toFixed(0)} KB)</option>`).join('');
+      // Auto-load the first (or only) CSV
+      loadCSVFromServer('/' + files[0].name);
+    } else {
+      document.getElementById('status').textContent = 'No CSV found — use Load CSV button';
+    }
+  } catch {
+    document.getElementById('status').textContent = 'No server CSV — use Load CSV button';
+  }
+}
+
+function loadSelectedCSV(url) {
+  loadCSVFromServer(url);
+}
+
+// ── Init ──
+listCSVFiles();
+
+// ── Keyboard shortcuts ──
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 't' || e.key === 'T') setView(currentView === 'chart' ? 'table' : 'chart');
+  if (e.key === 'r' || e.key === 'R') resetTimeRange();
+});
+</script>
+</body>
+</html>
